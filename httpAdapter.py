@@ -1,6 +1,6 @@
 from curses import has_key
 import traceback
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import pika
 import json
 
@@ -16,7 +16,7 @@ class EndOfReading(Exception):
 #Отправка сообщений в очередь
 @app.route('/exchange', methods=['POST'])
 def sendMessage():
-    requestMessage = request.get_json()
+    requestMessage = getMessage(request)
     messageList = getMessageList(requestMessage)
     if len(messageList) == 0:
         return 'Нет сообщений, которые можно передать', 400
@@ -73,7 +73,7 @@ def getMessages(messagesLimitNumber):
     except EndOfReading:
         channel.stop_consuming()
         closeConnection(connection)
-        result_ = json.dumps(result, ensure_ascii=False)
+        result_ = json.dumps(result, ensure_ascii=False,)
         return result_
     except Exception:
         message = traceback.print_exc()
@@ -99,11 +99,16 @@ def getMessagesNumber(queue):
     return messagesNumber
 
 def publishMessage(channel, exchange, routing_key, message):
-    channel.basic_publish(exchange=exchange, routing_key=routing_key, body=message)
+    body = json.dumps(message, ensure_ascii=False)
+    channel.basic_publish(exchange=exchange, routing_key=routing_key, body=body)
 
 def putMessageToResult(result, bodyFromMQ):
     body_str = bodyFromMQ.decode("utf-8")[:4000]
-    result.append(body_str)
+    try:
+        newElement = json.loads(body_str)
+    except json.JSONDecodeError:
+        newElement = body_str   
+    result.append(newElement)
 
 def acknowledgeMessage(channel, delivery_tag):
     channel.basic_ack(delivery_tag=delivery_tag)
@@ -140,7 +145,18 @@ def getMessageList(requestMessage):
     elif isinstance(requestMessage, dict) and 'message' in requestMessage:
         messagesList.append(requestMessage['message'])  
 
+    else:
+        messagesList.append(requestMessage)
+
     return messagesList 
+
+def getMessage(request):
+    requestMessage = request.get_json()
+    if requestMessage == None:
+        data = request.get_data()
+        requestMessage = data.decode("utf-8")[:4000]
+    
+    return requestMessage
 
 if __name__ == '__main__':
     app.run()
